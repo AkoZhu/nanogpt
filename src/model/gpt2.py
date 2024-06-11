@@ -1,3 +1,4 @@
+import inspect
 import math
 from dataclasses import dataclass
 import torch
@@ -15,6 +16,8 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
+        
         # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -40,10 +43,17 @@ class CausalSelfAttention(nn.Module):
         # attention (materialize the large (T, T) matrix for all the queries and keys)
         # attention with the normalization factor, making the variance to around 1
         # using the triangle matrix to get the mask in decoder.
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float("-inf"))
-        att = F.softmax(att, dim=-1)
-        y = att@v # (B, nh, T, T) @ (B, nh, T, ns) -> (B, nh, T, ns)
+        # att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        # att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float("-inf"))
+        # att = F.softmax(att, dim=-1)
+        # y = att@v # (B, nh, T, T) @ (B, nh, T, ns) -> (B, nh, T, ns)
+        
+        # Use the flash attention, which is more efficient
+        # it uses the online softmax computing and kernel fusion to optimize
+        # the attention computation.
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         #output the projection
         y = self.c_proj(y)
@@ -58,7 +68,7 @@ class MLP(nn.Module):
         self.c_fc   = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.c_gelu   = nn.GELU(approximate="tanh") 
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
-
+        self.c_proj.NANOGPT_SCALE_INIT = 1
     
     def forward(self, x):
         x = self.c_fc(x)
@@ -110,8 +120,30 @@ class GPT(nn.Module):
             ln_f  = nn.LayerNorm(config.n_embd),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-    
-    def forward(self, idx):
+
+        # weight sharing scheme, the wte should be the same as the final lm_head
+        # the reason is that if two tokens have the similarity, they should be mapped to
+        # the same embedding space, and they should be projected back to the same 
+        # vocabulary space. 
+        # save a lot of parameters
+        self.transformer.wte.weight = self.lm_head.weight
+
+        # initialize the weights
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, 'NANOGPT_SCALE_INIT'):
+                std *= (2 * self.config.n_layer) ** -0.5
+            # roughly 1/sqrt(in_dim)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, idx, targets=None):
         # idx is of shape (B, T)
         B, T = idx.size()
         assert T <= self.config.block_size, f"Connot forward sequence of length {T}, block size is {self.config.block_size}"
@@ -127,8 +159,39 @@ class GPT(nn.Module):
         # forward the final layer norm and the classifier
         x = self.transformer['ln_f'](x)
         logits = self.lm_head(x) # (B, T, vocab_size)
-        return logits
+        
+        loss = None
+        if targets is not None:
+            # logits.shape=(B, T, vocab_size), target.shape=(B, T)
+            # (B*T, vocab_size)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
 
+    def configure_optimizer(self, weight_decay, learning_rate, device):
+        # all of the candidate parameters that required grad
+        param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
+
+        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
+        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        no_decay_params = [p for n, p in param_dict.items() if p not in decay_params]
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': no_decay_params, 'weight_decay': 0.0}
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_no_decay_params = sum(p.numel() for p in no_decay_params)
+
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        print(f"num non-decayed parameter tensors: {len(no_decay_params)}, with {num_no_decay_params:,} parameters")
+        
+        # create AdamW optimizer 
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and 'cuda' in device
+        print(f"using fused AdamW: {use_fused}")
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
+        return optimizer
+    
     @classmethod
     def from_pretrained(cls, model_type):
         """Loads pretrained GPT-2 model weights from huggingface"""
