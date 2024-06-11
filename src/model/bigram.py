@@ -17,7 +17,7 @@ dropout = 0.2
 # ---------------
 
 # dataset
-dataset_name = 'tinyshakspeare'
+dataset_name = 'tinyshakespeare'
 
 # -------
 
