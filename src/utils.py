@@ -3,9 +3,11 @@ import tiktoken
 import math
 
 class DataLoaderLite:
-    def __init__(self, B, T, dataset='tinyshakespeare'):
+    def __init__(self, B, T, process_rank, num_processes, dataset='tinyshakespeare'):
         self.B = B
         self.T = T
+        self.process_rank = process_rank
+        self.num_processes = num_processes
 
         # at init load tokens from disk and store them in memory
         with open(f'../data/{dataset}/input.txt', 'r') as f:
@@ -20,7 +22,7 @@ class DataLoaderLite:
         print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
 
         # state
-        self.current_position = 0
+        self.current_position = self.B * self.T * self.process_rank
     
     def next_batch(self):
         B, T = self.B, self.T
@@ -28,10 +30,10 @@ class DataLoaderLite:
         x = buf[:-1].view(B, T)
         y = buf[1:].view(B, T)
         # advance the position
-        self.current_position += B*T
+        self.current_position += B*T*self.num_processes
         # if loading the next batch would be out of bounds, reset
-        if self.current_position + B*T + 1 > len(self.tokens):
-            self.current_position = 0
+        if self.current_position + B*T*self.num_processes + 1 > len(self.tokens):
+            self.current_position = self.B * self.T * self.process_rank
         return x, y
 
 # cosine manner of learning rate
