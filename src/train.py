@@ -76,7 +76,7 @@ optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, dev
 for i in range(max_steps):
     t0 = time.time()
     optimizer.zero_grad()
-
+    loss_accum = 0
     # gradient accumulation
     for micro_step in range(grad_accu_steps):
         x, y = train_loader.next_batch()
@@ -85,6 +85,8 @@ for i in range(max_steps):
             # make the logits bfloat16, optimizing the runing speed.
             # the parameters will be still float32
             logits, loss = model(x, y)
+        loss /= grad_accu_steps # make sure the loss is averaged
+        loss_accum += loss.detach() # accumulate the loss for printing.
         loss.backward()
     # clip the global norm of the gradient at 1.0
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -103,9 +105,9 @@ for i in range(max_steps):
         torch.cuda.synchronize() # wait for the GPU to finish work
     t1 = time.time()
     dt = t1 - t0 # time difference in seconds
-    tokens_processed = train_loader.B * train_loader.T
+    tokens_processed = train_loader.B * train_loader.T * grad_accu_steps
     tokens_per_sec = tokens_processed / dt
-    print(f"step {i} | lr:{lr} | loss:{loss} | dt:{dt} | tokens/sec:{tokens_per_sec:.0f}")
+    print(f"step {i} | lr:{lr} | loss:{loss_accum.item():.6f} | dt:{dt} | tokens/sec:{tokens_per_sec:.0f}")
 
 
 import sys; sys.exit(0)
