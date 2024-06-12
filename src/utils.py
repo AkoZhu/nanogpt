@@ -9,7 +9,7 @@ def load_tokens(filename) -> torch.Tensor:
    return torch.tensor(np.load(filename), dtype=torch.long)
 
 class DataLoaderLite:
-    def __init__(self, B, T, process_rank, num_processes,split='train' ,dataset='tinyshakespeare'):
+    def __init__(self, B, T, process_rank, num_processes, split='train' ,dataset='tinyshakespeare'):
         self.B = B
         self.T = T
         self.process_rank = process_rank
@@ -17,10 +17,10 @@ class DataLoaderLite:
         assert split in ['train', 'val']
 
         # at init load tokens from disk and store them in memory
-        with open(f'../data/{dataset}/input.txt', 'r') as f:
-            print(f'loading {dataset} dataset')
-            text = f.read()
-            print(f"text length {len(text)}")
+        # with open(f'../data/{dataset}/input.txt', 'r') as f:
+        #     print(f'loading {dataset} dataset')
+        #     text = f.read()
+        #     print(f"text length {len(text)}")
         
         # get shard filenames
         data_root = "edu_fineweb10B"
@@ -39,6 +39,9 @@ class DataLoaderLite:
         # print(f"loading {len(self.tokens)} tokens")
         # print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
 
+        self.reset()
+
+    def reset(self):
         # state
         # use shard and current position to keep track of where we are in the data
         self.current_shard = 0
