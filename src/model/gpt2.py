@@ -167,7 +167,7 @@ class GPT(nn.Module):
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
 
-    def configure_optimizer(self, weight_decay, learning_rate, device):
+    def configure_optimizer(self, weight_decay, learning_rate, device_type):
         # all of the candidate parameters that required grad
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
 
@@ -187,7 +187,7 @@ class GPT(nn.Module):
         
         # create AdamW optimizer 
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
-        use_fused = fused_available and 'cuda' in device
+        use_fused = fused_available and device_type == "cuda"
         print(f"using fused AdamW: {use_fused}")
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
         return optimizer

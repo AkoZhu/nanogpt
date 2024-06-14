@@ -1,6 +1,6 @@
 from model.gpt2 import GPT, GPTConfig
 from utils import DataLoaderLite
-from utils import get_lr
+# from utils import get_lr
 import torch
 import os 
 
@@ -26,7 +26,7 @@ from hellaswag import iterate_examples, render_example, get_most_likely_row
 # simple run
 # python train.py
 # DDP launch for e.g. 8 gpu
-# torchrun --standalone --nproc_per_node=8 train.py
+# torchrun --standalone --nproc_per_node=2 train.py
 
 # Set up the DDP(distributed data parallel).
 # torchrun command sets the env variables like RANK, LOCAL_RANK, and WORLD_SIZE
@@ -41,6 +41,7 @@ if ddp:
     device = f'cuda:{ddp_local_rank}'
     torch.cuda.set_device(device)
     master_process = ddp_rank == 0
+    torch.cuda.empty_cache()
 else:
     # if not DDP, we use the CPU or GPU
     ddp_rank = 0
@@ -50,9 +51,12 @@ else:
     device = 'cpu'
     if torch.cuda.is_available():
         device = 'cuda'
+        torch.cuda.empty_cache()
     elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
         device = 'mps'
     print(f"using device:{device}")
+
+device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 # setting seeds
 torch.manual_seed(1337)
@@ -79,8 +83,8 @@ if torch.cuda.is_available():
 # the gradient is accumulated for N steps before the optimizer step is taken
 # this is equivalent to having a larger batch size of B x N
 total_batch_size = 524288   # 2**19, ~0.5M tokens, in GPT-3
-B = 8                      # our micro batch size # Can use 32 
-T = 2048                    # sequence length.     # can use 2048
+B = 16                      # our micro batch size # Can use 32 
+T = 1024                    # sequence length.     # can use 2048
 assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
 grad_accu_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
@@ -107,6 +111,7 @@ torch.set_float32_matmul_precision("high") # by default it is highest
 # print(loss)
 # print(f"logits.shape: {logits.shape}")
 
+# print(device)
 #-----------
 # training loop
 import time
@@ -120,7 +125,7 @@ max_steps = 19073       # 1e8 tokens / 2**19(0.5M) tokens per batch
 # use the GPT-3 hyperparameters
 # optimizer = torch.optim.AdamW(model.parameters(), lr=max_lr, betas=(0.9, 0.95), eps=1e-8)
 # using the weight decay
-optimizer = raw_model.configure_optimizer(weight_decay=0.1, learning_rate=max_lr, device=device)
+optimizer = raw_model.configure_optimizer(weight_decay=0.1, learning_rate=max_lr, device_type=device_type)
 
 # create the log directory and save the checkpoints and log to
 log_dir = "../log"
@@ -130,6 +135,24 @@ with open(log_file, "w") as f: # clear the log file
     pass 
 
 enc = tiktoken.get_encoding('gpt2')
+
+# max_lr = 6e-4
+# min_lr = max_lr * 0.1
+# warmup_steps = 715
+# max_steps = 19073 # 19,073 steps is ~1 epoch, if data is 10B tokens and batch size 0.5M tokens
+def get_lr(it):
+    # 1) linear warmup for warmup_iters steps
+    if it < warmup_steps:
+        return max_lr * (it+1) / warmup_steps
+    # 2) if it > lr_decay_iters, return min learning rate
+    if it > max_steps:
+        return min_lr
+    # 3) in between, use cosine decay down to min learning rate
+    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff starts at 1 and goes to 0
+    return min_lr + coeff * (max_lr - min_lr)
+
 # we are doing 1 epoch
 for step in range(max_steps):
     t0 = time.time()
@@ -145,8 +168,8 @@ for step in range(max_steps):
             for _ in range(val_loss_steps):
                 x, y = val_loader.next_batch()
                 x, y = x.to(device), y.to(device)
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                    logits, loss = model(x, y)
+                # with torch.autocast(device_type=device_type, dtype=torch.float16):
+                logits, loss = model(x, y)
                 loss = loss / val_loss_steps
                 val_loss_accum += loss.detach()
         if ddp:
@@ -155,7 +178,7 @@ for step in range(max_steps):
             print(f"validation loss: {val_loss_accum.item():.6f}")
             
             # writing the log_file and checkpoints 
-            with open(log_file, "w") as f:
+            with open(log_file, "a") as f:
                 f.write(f"step:{step} | val_loss:{val_loss_accum.item():.6f}\n")
             if step > 0 and step % 5000 == 0 or last_step:
                 # save the model checkpoint
@@ -172,6 +195,7 @@ for step in range(max_steps):
 
     # evaluate the hellaSwag
     if (step % 250 == 0 or last_step) and (not use_compile):
+        model.eval()
         num_correct_norm = 0
         num_total = 0
         for i, example in enumerate(iterate_examples("val")):
@@ -184,8 +208,8 @@ for step in range(max_steps):
             mask = mask.to(device)
             # get the logits 
             with torch.no_grad():
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                    logits, loss = model(tokens)
+                # with torch.autocast(device_type=device_type, dtype=torch.float16):
+                logits, loss = model(tokens)
                 pred_norm = get_most_likely_row(tokens, mask, logits)
             num_total += 1
             num_correct_norm += int(pred_norm == label)
@@ -218,8 +242,8 @@ for step in range(max_steps):
         while xgen.size(1) < max_length:
             # forward the model to get the logits
             with torch.no_grad():
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                    logits, loss = model(xgen) # (B, T, vocab_size)
+                # with torch.autocast(device_type=device_type, dtype=torch.float16):
+                logits, loss = model(xgen) # (B, T, vocab_size)
                 # take th elogits at the last position
                 logits = logits[:, -1, :]
                 # get probabilities
@@ -240,16 +264,17 @@ for step in range(max_steps):
             print(f"rank {ddp_rank} sample {i}: {decoded}")
 
     # train the model
+    model.train()
     optimizer.zero_grad()
     loss_accum = 0
     # gradient accumulation
     for micro_step in range(grad_accu_steps):
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        # with torch.autocast(device_type=device_type, dtype=torch.float16):
             # make the logits bfloat16, optimizing the runing speed.
             # the parameters will be still float32
-            logits, loss = model(x, y)
+        logits, loss = model(x, y)
         loss /= grad_accu_steps # make sure the loss is averaged
         loss_accum += loss.detach() # accumulate the loss for printing.
         # only sync the gradient at the very last micro step 
@@ -263,16 +288,17 @@ for step in range(max_steps):
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     
     # determine and set the learning rate based on the cosine manner
-    lr = get_lr(step, 
-                warmup_steps=warmup_steps, 
-                max_steps=max_steps, 
-                max_lr=max_lr, 
-                min_lr=min_lr)
+    # lr = get_lr(step, 
+    #             warmup_steps=warmup_steps, 
+    #             max_steps=max_steps, 
+    #             max_lr=max_lr, 
+    #             min_lr=min_lr)
+    lr = get_lr(step)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     
     optimizer.step()
-    if device == 'cuda':
+    if device_type == 'cuda':
         torch.cuda.synchronize() # wait for the GPU to finish work
     t1 = time.time()
     dt = t1 - t0 # time difference in seconds

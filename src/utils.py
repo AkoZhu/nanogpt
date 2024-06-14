@@ -6,7 +6,9 @@ import numpy as np
 
 
 def load_tokens(filename) -> torch.Tensor:
-   return torch.tensor(np.load(filename), dtype=torch.long)
+    data = np.load(filename)
+    data = data.astype(int)
+    return torch.tensor(data, dtype=torch.long)
 
 class DataLoaderLite:
     def __init__(self, B, T, process_rank, num_processes, split='train' ,dataset='tinyshakespeare'):
