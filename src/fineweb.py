@@ -40,15 +40,18 @@ HF_CACHE_DIR = "/root/autodl-tmp/hf_cache"
 data_files = os.listdir(LOCAL_RAW_DATA_DIR)
 data_files = {"train": [file for file in data_files]}
 
-raw_datasets = load_dataset("parquet", 
+fw = load_dataset("parquet", 
                 data_dir=LOCAL_RAW_DATA_DIR, 
                 data_files=data_files,
                 cache_dir=HF_CACHE_DIR
             )
 
-for split in raw_datasets.keys():
-    print(f"{split}: {raw_datasets[split].num_rows} items")
-import sys; sys.exit(0)
+for split in fw.keys():
+    print(f"{split}: {fw[split].num_rows} items")
+
+# print(fw['train'].column_names)
+fw = fw['train']
+# import sys; sys.exit(0)
 # init the tokenizer 
 enc = tiktoken.get_encoding('gpt2')
 eot = enc._special_tokens['<|endoftext|>'] # end of text token
@@ -85,12 +88,12 @@ with mp.Pool(nprocs) as pool:
             all_tokens_np[token_count:token_count + len(tokens)] = tokens
             token_count += len(tokens)
             if progress_bar is None:
-                progress_bar = tqdm(total=shard_size, uint="tokens", desc=f"Shard {shard_index}")
+                progress_bar = tqdm(total=shard_size, unit="tokens", desc=f"Shard {shard_index}")
             progress_bar.update(len(tokens))
         else:
             # write the current shard and start a new one
             split = "val" if shard_index == 0 else "train"
-            filename = os.path.join(TARGET_DATA_DIR, f"{split}_{shard_index}.npy")
+            filename = os.path.join(TARGET_DATA_DIR, f"edufineweb_{split}_{shard_index:06d}")
             # split the document into whatever fits in this shard; the remainder goes to next one
             # finish the remainder
             remainder = shard_size - token_count

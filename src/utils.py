@@ -23,14 +23,14 @@ class DataLoaderLite:
         #     print(f"text length {len(text)}")
         
         # get shard filenames
-        data_root = "edu_fineweb10B"
+        data_root = "/root/autodl-tmp/data/edu_fineweb10B/train_data"
         shards = os.listdir(data_root)
         shards = [os.path.join(data_root, shard) for shard in shards]
         shards = sorted(shards)
         self.shards = shards
 
         assert len(shards) > 0, "no data shards found for split {split}"
-        if int(os.environ['RANK']) == 0: # master process
+        if process_rank == 0: # master process
             print(f"loading {len(shards)} shards for split {split}")
         
         # enc = tiktoken.get_encoding('gpt2')

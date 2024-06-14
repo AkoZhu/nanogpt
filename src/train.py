@@ -11,7 +11,7 @@ from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 #--------------
-from hellaswag import iterate_example, render_example, get_most_likely_row
+from hellaswag import iterate_examples, render_example, get_most_likely_row
 
 # we start to train the gpt2 model
 
@@ -79,8 +79,8 @@ if torch.cuda.is_available():
 # the gradient is accumulated for N steps before the optimizer step is taken
 # this is equivalent to having a larger batch size of B x N
 total_batch_size = 524288   # 2**19, ~0.5M tokens, in GPT-3
-B = 16                      # our micro batch size # Can use 32 
-T = 1024                    # sequence length.     # can use 2048
+B = 8                      # our micro batch size # Can use 32 
+T = 2048                    # sequence length.     # can use 2048
 assert total_batch_size % (B * T * ddp_world_size) == 0, "make sure total_batch_size is divisible by B * T * ddp_world_size"
 grad_accu_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
@@ -91,7 +91,7 @@ train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp
 val_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size, split='val')
 
 # create the model
-model = GPT(GPTConfig(vocab_size=50304)) # fix the ugly number of vocab_size
+model = GPT(GPTConfig(block_size=T, vocab_size=50304)) # fix the ugly number of vocab_size
 model.to(device)
 use_compile = False # torch.compile interferes with HellaSwag and Generation
 if use_compile:
@@ -120,11 +120,11 @@ max_steps = 19073       # 1e8 tokens / 2**19(0.5M) tokens per batch
 # use the GPT-3 hyperparameters
 # optimizer = torch.optim.AdamW(model.parameters(), lr=max_lr, betas=(0.9, 0.95), eps=1e-8)
 # using the weight decay
-optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=max_lr, device=device)
+optimizer = raw_model.configure_optimizer(weight_decay=0.1, learning_rate=max_lr, device=device)
 
 # create the log directory and save the checkpoints and log to
-log_dir = "log"
-os.makedirs(f"../{log_dir}", exist_ok=True)
+log_dir = "../log"
+os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f"log_rank{ddp_rank}.txt")
 with open(log_file, "w") as f: # clear the log file
     pass 
@@ -174,7 +174,7 @@ for step in range(max_steps):
     if (step % 250 == 0 or last_step) and (not use_compile):
         num_correct_norm = 0
         num_total = 0
-        for i, example in enumerate(iterate_example("val")):
+        for i, example in enumerate(iterate_examples("val")):
             # only process examples where i % ddp_world_size == ddp_rank
             if i % ddp_world_size != ddp_rank:
                 continue
@@ -202,7 +202,7 @@ for step in range(max_steps):
         if master_process:
             print(f"HellaSwag accuracy: {num_correct_norm}/{num_total} = {acc_norm:.4f}")
             with open(log_file, "a") as f:
-                f.write(f"{step} hella {acc_norm:.4f}\n")
+                f.write(f"step {step} hella {acc_norm:.4f}\n")
 
     # Every 250 steps, we generate some samples 
     if ((step > 0 and step % 250 == 0) or last_step) and (not use_compile):
@@ -245,7 +245,7 @@ for step in range(max_steps):
     # gradient accumulation
     for micro_step in range(grad_accu_steps):
         x, y = train_loader.next_batch()
-        x.to(device), y.to(device)
+        x, y = x.to(device), y.to(device)
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
             # make the logits bfloat16, optimizing the runing speed.
             # the parameters will be still float32
@@ -279,10 +279,13 @@ for step in range(max_steps):
     tokens_processed = train_loader.B * train_loader.T * grad_accu_steps * ddp_world_size
     tokens_per_sec = tokens_processed / dt
     if master_process:
-        print(f"step {step} | lr:{lr} | loss:{loss_accum.item():.6f} | dt:{dt} | tokens/sec:{tokens_per_sec:.0f}")
+        print(f"step {step} | lr:{lr:e} | loss:{loss_accum.item():.6f} | norm: {norm:.4f} |dt:{dt} | tokens/sec:{tokens_per_sec:.0f}")
         with open(log_file, "a") as f:
             f.write(f"step {step} | train {loss_accum.item():.6f}\n")
 
+    if step == 250:
+        print("Trial run finished")
+        break
 if ddp:
     destroy_process_group()
 
