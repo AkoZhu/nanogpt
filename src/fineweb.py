@@ -11,24 +11,44 @@ import os
 import multiprocessing as mp
 import numpy as np
 import tiktoken
-from datasets import load_dataset
 from tqdm import tqdm
 
 #------------
-
-local_dir = 'edu_fineweb10B'
-remote_name = 'sample-10BT'
+# os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+from datasets import load_dataset
+#------------
+# local_dir = 'edu_fineweb10B'
+# remote_name = 'sample-10BT'
 shard_size = int(1e8) # 100M tokens per shard, total of 100 shards
 
 # the cache local directory if it doesn't exist
-DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), f"../data/{local_dir}")
+# DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), f"../data/{local_dir}")
+
+LOCAL_RAW_DATA_DIR = '/root/autodl-tmp/data/edu_fineweb10B/raw_data/sample/10BT'
+TARGET_DATA_DIR = '/root/autodl-tmp/data/edu_fineweb10B/train_data'
+HF_CACHE_DIR = "/root/autodl-tmp/hf_cache"
 # creating the dir in /data/edu_fineweb10B
 # print(DATA_CACHE_DIR)
-os.makedirs(DATA_CACHE_DIR, exist_ok=True)
+# os.makedirs(DATA_CACHE_DIR, exist_ok=True)
 
 # download the dataset
-fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train")
+# fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train")
 
+
+# load the dataset locally
+# get all file name in the directory
+data_files = os.listdir(LOCAL_RAW_DATA_DIR)
+data_files = {"train": [file for file in data_files]}
+
+raw_datasets = load_dataset("parquet", 
+                data_dir=LOCAL_RAW_DATA_DIR, 
+                data_files=data_files,
+                cache_dir=HF_CACHE_DIR
+            )
+
+for split in raw_datasets.keys():
+    print(f"{split}: {raw_datasets[split].num_rows} items")
+import sys; sys.exit(0)
 # init the tokenizer 
 enc = tiktoken.get_encoding('gpt2')
 eot = enc._special_tokens['<|endoftext|>'] # end of text token
@@ -70,7 +90,7 @@ with mp.Pool(nprocs) as pool:
         else:
             # write the current shard and start a new one
             split = "val" if shard_index == 0 else "train"
-            filename = os.path.join(DATA_CACHE_DIR, f"{split}_{shard_index}.npy")
+            filename = os.path.join(TARGET_DATA_DIR, f"{split}_{shard_index}.npy")
             # split the document into whatever fits in this shard; the remainder goes to next one
             # finish the remainder
             remainder = shard_size - token_count
@@ -87,5 +107,5 @@ with mp.Pool(nprocs) as pool:
     # write the remaining tokens as the last shard
     if token_count != 0:
         split = 'val' if shard_index == 0 else 'train'
-        filename = os.path.join(DATA_CACHE_DIR, f"edufineweb_{split}_{shard_index:06d}")
+        filename = os.path.join(TARGET_DATA_DIR, f"edufineweb_{split}_{shard_index:06d}")
         write_datafile(filename, all_tokens_np[:token_count])
