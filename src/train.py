@@ -283,9 +283,9 @@ for step in range(max_steps):
         with open(log_file, "a") as f:
             f.write(f"step {step} | train {loss_accum.item():.6f}\n")
 
-    if step == 250:
-        print("Trial run finished")
-        break
+    # if step == 250:
+    #     print("Trial run finished")
+    #     break
 if ddp:
     destroy_process_group()
 
