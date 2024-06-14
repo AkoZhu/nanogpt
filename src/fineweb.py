@@ -34,6 +34,9 @@ HF_CACHE_DIR = "/root/autodl-tmp/hf_cache"
 # download the dataset
 # fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train")
 
+# create the necessary folder
+os.makedirs(TARGET_DATA_DIR, exist_ok=True)
+os.makedirs(HF_CACHE_DIR, exist_ok=True)
 
 # load the dataset locally
 # get all file name in the directory

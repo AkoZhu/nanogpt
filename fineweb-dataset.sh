@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# create the necessary folder
+target_dir='/root/autodl-tmp/data/edu_fineweb10B/raw_data/sample/10BT'
+mkdir -p $target_dir
+
 urls=(
 "https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu/resolve/main/sample/10BT/000_00000.parquet"
 "https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu/resolve/main/sample/10BT/001_00000.parquet"
