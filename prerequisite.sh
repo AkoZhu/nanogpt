@@ -2,7 +2,7 @@
 
 # lib
 pip install -U huggingface_hub
-pip install datasets tiktoken
+pip install datasets tiktoken transformers
 
 
 # 
