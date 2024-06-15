@@ -168,8 +168,8 @@ for step in range(max_steps):
             for _ in range(val_loss_steps):
                 x, y = val_loader.next_batch()
                 x, y = x.to(device), y.to(device)
-                # with torch.autocast(device_type=device_type, dtype=torch.float16):
-                logits, loss = model(x, y)
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                    logits, loss = model(x, y)
                 loss = loss / val_loss_steps
                 val_loss_accum += loss.detach()
         if ddp:
@@ -208,8 +208,8 @@ for step in range(max_steps):
             mask = mask.to(device)
             # get the logits 
             with torch.no_grad():
-                # with torch.autocast(device_type=device_type, dtype=torch.float16):
-                logits, loss = model(tokens)
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                    logits, loss = model(tokens)
                 pred_norm = get_most_likely_row(tokens, mask, logits)
             num_total += 1
             num_correct_norm += int(pred_norm == label)
@@ -229,7 +229,7 @@ for step in range(max_steps):
                 f.write(f"step {step} hella {acc_norm:.4f}\n")
 
     # Every 250 steps, we generate some samples 
-    if ((step > 0 and step % 250 == 0) or last_step) and (not use_compile):
+    if (( step > 0 and step % 250 == 0) or last_step) and (not use_compile):
         model.eval()
         num_return_sequences = 4
         max_length = 32
@@ -242,8 +242,8 @@ for step in range(max_steps):
         while xgen.size(1) < max_length:
             # forward the model to get the logits
             with torch.no_grad():
-                # with torch.autocast(device_type=device_type, dtype=torch.float16):
-                logits, loss = model(xgen) # (B, T, vocab_size)
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                    logits, loss = model(xgen) # (B, T, vocab_size)
                 # take th elogits at the last position
                 logits = logits[:, -1, :]
                 # get probabilities
@@ -271,10 +271,10 @@ for step in range(max_steps):
     for micro_step in range(grad_accu_steps):
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
-        # with torch.autocast(device_type=device_type, dtype=torch.float16):
+        with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
             # make the logits bfloat16, optimizing the runing speed.
             # the parameters will be still float32
-        logits, loss = model(x, y)
+            logits, loss = model(x, y)
         loss /= grad_accu_steps # make sure the loss is averaged
         loss_accum += loss.detach() # accumulate the loss for printing.
         # only sync the gradient at the very last micro step 
