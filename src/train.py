@@ -135,6 +135,10 @@ log_file = os.path.join(log_dir, f"log_rank{ddp_rank}.txt")
 with open(log_file, "w") as f: # clear the log file
     pass 
 
+std_output = "./output.log"
+is_std_file = True # redirect to the file 
+with open(std_output, "w") as f: # clear the log file
+    pass
 enc = tiktoken.get_encoding('gpt2')
 
 # max_lr = 6e-4
@@ -176,7 +180,10 @@ for step in range(max_steps):
         if ddp:
             dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
         if master_process:
-            print(f"validation loss: {val_loss_accum.item():.6f}")
+            if is_std_file:
+                with open(std_output, "a") as f: # clear the log file
+                    f.write(f"validation loss: {val_loss_accum.item():.6f}\n")
+            else: print(f"validation loss: {val_loss_accum.item():.6f}")
             
             # writing the log_file and checkpoints 
             with open(log_file, "a") as f:
@@ -225,7 +232,10 @@ for step in range(max_steps):
             num_total, num_correct_norm = num_total.item(), num_correct_norm.item()
         acc_norm = num_correct_norm / num_total
         if master_process:
-            print(f"HellaSwag accuracy: {num_correct_norm}/{num_total} = {acc_norm:.4f}")
+            if is_std_file:
+                with open(std_output, "a") as f:
+                    f.write(f"HellaSwag accuracy: {num_correct_norm}/{num_total} = {acc_norm:.4f}\n")
+            else: print(f"HellaSwag accuracy: {num_correct_norm}/{num_total} = {acc_norm:.4f}")
             with open(log_file, "a") as f:
                 f.write(f"step {step} hella {acc_norm:.4f}\n")
 
@@ -262,7 +272,10 @@ for step in range(max_steps):
         for i in range(num_return_sequences):
             tokens = xgen[i, :max_length].tolist()
             decoded = enc.decode(tokens)
-            print(f"rank {ddp_rank} sample {i}: {decoded}")
+            if is_std_file:
+                with open(std_output, "a") as f:
+                    f.write(f"rank {ddp_rank} sample {i}: {decoded}\n")
+            else: print(f"rank {ddp_rank} sample {i}: {decoded}")
 
     # train the model
     model.train()
@@ -306,7 +319,10 @@ for step in range(max_steps):
     tokens_processed = train_loader.B * train_loader.T * grad_accu_steps * ddp_world_size
     tokens_per_sec = tokens_processed / dt
     if master_process:
-        print(f"step {step} | lr:{lr:e} | loss:{loss_accum.item():.6f} | norm: {norm:.4f} |dt:{dt} | tokens/sec:{tokens_per_sec:.0f}")
+        if is_std_file:
+            with open(std_output, "a") as f:
+                f.write(f"step {step} | lr:{lr:e} | loss:{loss_accum.item():.6f} | norm: {norm:.4f} |dt:{dt} | tokens/sec:{tokens_per_sec:.0f}\n")
+        else: print(f"step {step} | lr:{lr:e} | loss:{loss_accum.item():.6f} | norm: {norm:.4f} |dt:{dt} | tokens/sec:{tokens_per_sec:.0f}")
         with open(log_file, "a") as f:
             f.write(f"step {step} | train {loss_accum.item():.6f}\n")
 
