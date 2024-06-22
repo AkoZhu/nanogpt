@@ -59,6 +59,8 @@ def main():
 
     print(args.__dict__)
 
+    print(ali.get_file_list())
+    
     is_upload, is_file, remote, local = (
         args.is_up,
         args.is_file,
@@ -66,6 +68,7 @@ def main():
         args.local,
     )
 
+    
     # 上传
     if is_upload:
         print("上传...")

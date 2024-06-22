@@ -1,0 +1,8 @@
+
+using device:cuda
+The total desired_batch_size=524288, with grad_accu_steps=32
+loading 100 shards for split train
+loading 100 shards for split val
+num decayed parameter tensors: 50, with 124,354,560 parameters
+num non-decayed parameter tensors: 98, with 121,344 parameters
+using fused AdamW: True
