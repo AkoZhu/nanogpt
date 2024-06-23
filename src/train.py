@@ -187,7 +187,7 @@ for step in range(max_steps):
             
             # writing the log_file and checkpoints 
             with open(log_file, "a") as f:
-                f.write(f"step:{step} | val_loss:{val_loss_accum.item():.6f}\n")
+                f.write(f"step {step} | val {val_loss_accum.item():.6f}\n")
             if step > 0 and step % 5000 == 0 or last_step:
                 # save the model checkpoint
                 checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
@@ -237,7 +237,7 @@ for step in range(max_steps):
                     f.write(f"HellaSwag accuracy: {num_correct_norm}/{num_total} = {acc_norm:.4f}\n")
             else: print(f"HellaSwag accuracy: {num_correct_norm}/{num_total} = {acc_norm:.4f}")
             with open(log_file, "a") as f:
-                f.write(f"step {step} hella {acc_norm:.4f}\n")
+                f.write(f"step {step} | hella {acc_norm:.4f}\n")
 
     # Every 250 steps, we generate some samples 
     if (( step > 0 and step % 250 == 0) or last_step) and (not use_compile):
