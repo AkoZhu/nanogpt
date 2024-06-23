@@ -8,7 +8,14 @@ The simplest, fastest repository for training/finetuning medium-sized GPTs inspi
     - Modify the target folder path for further usage.
 4. Install `datasets`, `tiktoken`
 
+## Result
+- Here is the final result graph of our 124M `nanoGPT` with the comparison to the OpenAI GPT-2.
+    - The left one is the train-val loss compared with the GPT-2 baseline. 
+    - The right one is the hellaSwag validation dataset compared to the OpenAI GPT-2.
+    
+![train result graph](output/graph/loss_graph.png)
+
 ## Task
-- [ ]  Process the final result to get the graph
+- [X]  Process the final result to get the graph
 - [ ] Formalize the README
 - [X]  Train the model using RTX 4090
